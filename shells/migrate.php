@@ -98,6 +98,48 @@ class MigrateShell extends Shell {
         $this->out( 'Schema file ( schema.yml ) successfully written!' );
         $this->out('');
     }
+	
+	/**
+	 * Generates a new empty migration file with the correct revision number.
+	 */
+	function create(){
+		if (!count($this->args) > 0){
+			$this->out('No file name specified. Exiting...');
+			return;
+		}
+		
+		$migration_name = $this->args[0];
+
+		if (preg_match("/[^0-9A-Za-z\-]/", $migration_name)) {
+			$this->out('Please use only alphanumeric characters and dashes on your migration name.');
+			return;
+		}
+		
+		$oFolder = new Folder(MIGRATIONS_PATH, true, 0777);
+		$current_files = $oFolder->find('[0-9]{3}\_' . $migration_name . '\.yml');
+		
+        if (count($current_files) > 0){
+        	$this->out('You already have a migration with that name. Please choose another name.');
+			return;
+        }
+		
+		$version = $this->iMigration_count + 1;
+		
+		$this->out('Creating new migration file...');
+		$this->out('New migration revision is ' . $version);
+		$this->out('');
+		$this->hr();
+		
+		$contents = array("DOWN" => "","UP" => "");
+		$yaml = new Spyc();
+		
+		$file_content = $yaml->YAMLDump($contents);
+		$file_name = str_pad($version, 3, "0", STR_PAD_LEFT) . '_' . $migration_name . '.yml';
+		$oFile = new File(MIGRATIONS_PATH . DS . $file_name, true);
+		$oFile->write($file_content);
+		$this->out('');
+		$this->out('Migration file (' . $file_name . ') created succesfully!');
+	}
 
     /**
     * Migrates down to the previous version
