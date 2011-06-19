@@ -254,6 +254,9 @@ class MigrateShell extends Shell {
         $this->out('  cake migrate generate');
         $this->out('    - Write an YAML file out of your current DB schema');
         $this->out('');
+		$this->out('  cake migrate create <migration_name>');
+        $this->out('    - Creates an empty YAML file with the specfied name');
+        $this->out('');
         $this->out('  cake migrate help');
         $this->out('    - Displays this Help');
         $this->out('');
