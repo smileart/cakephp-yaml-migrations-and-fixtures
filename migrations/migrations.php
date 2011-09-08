@@ -12,13 +12,13 @@ App::import('vendor','spyc');
 App::import('Core', 'ConnectionManager');
 
 class Migrations{
-    const SPYC_CLASS_NOT_FOUND  = 0;
+    const SPYC_CLASS_NOT_FOUND  =  0;
     const YAML_FILE_NOT_FOUND   = -1;
     const YAML_FILE_IS_INVALID  = -2;
     const YAML_FILE_NOT_LOADED  = -3;
-    
+
     var $aTasks = array();
-    
+
     var $aTypes = array(
         'string',
         'text',
@@ -33,26 +33,41 @@ class Migrations{
         'time',
         'timestamp'
     );
-    
+
+    var $aTableTypes = array(
+        'ARCHIVE',
+        'CSV',
+        'EXAMPLE',
+        'FEDERATED',
+        'HEAP',
+        'InnoDB',
+        'MEMORY',
+        'MERGE',
+        'MyISAM',
+        'NDBCLUSTER'
+    );
+
+    var $sTableType = null;
+
     var $aUuid_format = array(
         'type'    => 'text',
         'length'  => 36
     );
-    
+
     var $aId_format = array(
         'type'    => 'integer',
         'length'  => 10,
         'key' => 'primary'
     );
-    
-    var $bUse_uuid = false;
-    
-    var $bLoaded = false;
-    
+
+    var $bUse_uuid  = false;
+
+    var $bLoaded    = false;
+
     var $bSpycReady = false;
-    
+
     var $oDb;
-        
+
     /**
     * Constructor - checks dependencies and loads the connection
     *
@@ -64,7 +79,7 @@ class Migrations{
             $this->bSpycReady = true;
         $this->oDb = & ConnectionManager::getDataSource($sConnection);
     }
-    
+
     /**
     * Executes all queries from the UP section
     *
@@ -73,7 +88,7 @@ class Migrations{
     function up(){
         return $this->_run('UP');
     }
-    
+
     /**
     * Executes all queries from the DOWN section
     *
@@ -82,7 +97,7 @@ class Migrations{
     function down(){
         return $this->_run('DOWN');
     }
-    
+
     /**
     * Generates an YAML file from the current DB schema
     */
@@ -90,18 +105,24 @@ class Migrations{
         $aResult = array();
         $aResult['UP'] = $aResult['DOWN'] = array();
         $aResult['UP']['create_table'] = $aResult['DOWN']['drop_table'] = array();
-        
+
         $aTables = $this->oDb->listSources();
+
+        if( in_array('schema_info', array_values($aTables)) ){
+            // fast unset `schema_info` by value
+            $aTables = explode(',',str_replace('schema_info'.',','',(join(',',$aTables))));
+        }
+
         foreach( $aTables as $sTable ){
             $sTableName = str_replace( $this->getPrefix(), '', $sTable );
             $aTableSchema = $this->_buildSchema( $sTableName );
             $aResult['UP']['create_table'][$sTableName] = $aTableSchema;
             $aResult['DOWN']['drop_table'][] = $sTableName;
         }
-        
+
         return Spyc::YAMLDump($aResult);
     }
-    
+
     /**
     * Loads the YAML file with the YAML schema and parses it into self::aTasks
     *
@@ -111,7 +132,7 @@ class Migrations{
     function load($sFile){
         if( !$this->bSpycReady )
             return self::SPYC_CLASS_NOT_FOUND;
-        
+
         if( !file_exists( $sFile ) )
             return self::YAML_FILE_NOT_FOUND;
 
@@ -119,10 +140,10 @@ class Migrations{
 
         $this->aTasks = array();
         $this->aTasks['UP'] = $this->aTasks['DOWN'] = array();
-        
+
         if( !is_array( $this->aSchema ) || !isset( $this->aSchema['UP'] ) || !isset( $this->aSchema['DOWN'] ) )
             return self::YAML_FILE_IS_INVALID;
-        
+
         foreach( $this->aSchema as $sDirection => $sAction ){
             foreach( $this->aSchema[$sDirection] as $sAction => $aElement ){
                 foreach( $aElement as $sName => $aProperties ){
@@ -162,34 +183,34 @@ class Migrations{
         $this->bLoaded = true;
         return true;
     }
-    
+
     function getPrefix(){
         return $this->oDb->config['prefix'];
     }
-        
+
     /**
     * Generate SQL for create table. If no_id and/or no_dates is specified, it will autogenerate an id field and dates fields ( created, modified )
     *
-    * @param string $sTable Table name
-    * @param array $aFields Array of fields in format array('field'=>array('type'=>'int','length'=>10,'null'=>true,'primary'=>true,'auto_increment'=>true))
+    * @param string  $sTable      Table name
+    * @param array   $aFields     Array of fields in format array('field'=>array('type'=>'int','length'=>10,'null'=>true,'primary'=>true,'auto_increment'=>true))
     */
     function create_table($sTable, $aFields = array()){
         //initialization
         $aIndexes = array();
-        
+
         $aKeys = array();
-        $aPrimary = array(); 
+        $aPrimary = array();
         $aPrimary['column'] = array();
 
         $sSql = 'CREATE TABLE '.$this->getPrefix().$sTable.'('."\n\t";
-        
+
         //Flag no_id - autogenerate an id field unless it is explicitly stated this is not needed
         if( !in_array( 'no_id', $aFields ) ){
             $aFormat = ( $this->bUse_uuid ) ? $this->aUuid_format : $this->aId_format;
             $sSql .= $this->oDb->buildColumn( am( array( 'name' => 'id' ), $aFormat ) ).", \n\t";
             $aPrimary['column'][] = 'id';
         }
-        
+
         //Go through all fields and generate the respective sql depending on the DB driver. Add respective keys' information, if needed
         foreach( $aFields as $sName => $aValue ){
             $sSql .= $this->_buildColumn( $sName, $aValue );
@@ -212,22 +233,30 @@ class Migrations{
             $aIndexes['PRIMARY'] = $aPrimary;
         if( count( $aKeys ) )
             $aIndexes = am( $aIndexes, $aKeys );
-        
+
         if( count( $aIndexes ) ){
             $sIndexes = $this->oDb->buildIndex( $aIndexes );
             //cakephp is backward incompatible!!!!
             if( is_array( $sIndexes ) )
                 $sIndexes = join(",\n\t", $sIndexes);
-        
+
             $sSql .= $sIndexes."\n\t";
         }
-        
+
         //Clear the data and return
         $sSql = trim( $sSql, ", \n\t" );
-        $sSql .= ');';
+        $sSql .= ')';
+
+        //Add engine option
+        if(!empty($this->sTableType) && in_array($this->sTableType, $this->aTableTypes)){
+            $sSql .= " ENGINE = {$this->sTableType}";
+        }
+
+        $sSql .= ';';
+
         return $sSql;
     }
-    
+
     /**
     * Generate a SQL array for merging a table. If no_id and/or no_dates is specified, it will autogenerate an id field and dates fields ( created, modified )
     *
@@ -239,12 +268,12 @@ class Migrations{
         if( !in_array( $this->getPrefix().$sTable, $this->oDb->listSources() ) ){
             return array( $this->create_table( $sTable, $aFields ) );
         }
-        
+
         //table does not exist - merge it
         $aQueries = array();
         $aIndexes = array();
         $aCurrentFields = $this->oDb->describe( new Model( false, $sTable ) );
-        
+
         //no_id and no_dates first
 
         //there should be an id according to the new schema
@@ -285,25 +314,25 @@ class Migrations{
                 else{
                     $aFields[ $sCurrentFieldName ]['null'] = true;
                 }
-                
+
                 //properties are different
                 if( $aCurrentFieldProperties != $aFields[ $sCurrentFieldName ] ){
                     $aQueries[] = $this->alter_field( $sTable, array( $sCurrentFieldName => $aFields[ $sCurrentFieldName ] ) );
                 }
-                
+
                 //keys ( except for primary! ) - add keys only if they don't already exist
                 $aKeys = array();
-                if( !empty( $aFields[ $sCurrentFieldName ]['unique'] ) && 
+                if( !empty( $aFields[ $sCurrentFieldName ]['unique'] ) &&
 						( !isset( $aCurrentFieldProperties['key'] ) || $aCurrentFieldProperties['key'] != "unique" )
 						){
                     $aQueries[] = $this->add_key( $sTable, array( 'unique' => $sCurrentFieldName ) );
                 }
-                if( !empty( $aFields[ $sCurrentFieldName ]['index'] ) && 
+                if( !empty( $aFields[ $sCurrentFieldName ]['index'] ) &&
 						( !isset( $aCurrentFieldProperties['key'] ) || $aCurrentFieldProperties['key'] != "index" )
 						){
                     $aQueries[] = $this->add_key( $sTable, array( 'index' => $sCurrentFieldName ) );
                 }
-                        
+
                 unset( $aFields[ $sCurrentFieldName ] );
             }
         }
@@ -319,7 +348,7 @@ class Migrations{
                 $aQueries[] = $this->add_key( $sTable, array( 'index' => $sFieldName ) );
             }
         }
-        
+
         //there should be dates fields according to the new schema
         if( !in_array( 'no_dates', $aFields ) ){
             //but there is no such one in the current schema
@@ -334,10 +363,10 @@ class Migrations{
             $aQueries[] = $this->drop_field( $sTable, 'created' );
             $aQueries[] = $this->drop_field( $sTable, 'modified' );
         }
-                
+
         return $aQueries;
     }
-        
+
     /**
     * Generate SQL for rename table
     */
@@ -345,7 +374,7 @@ class Migrations{
         $sSql = 'ALTER TABLE '.$this->getPrefix().$sTable.' RENAME TO '.$sName.';';
         return $sSql;
     }
-        
+
     /**
     * Generate SQL for drop table
     */
@@ -353,7 +382,7 @@ class Migrations{
         $sSql = 'DROP TABLE IF EXISTS '.$this->getPrefix().$sTable.';';
         return $sSql;
     }
-    
+
     /**
     * Generate SQL for truncate table
     */
@@ -361,7 +390,7 @@ class Migrations{
         $sSql = 'TRUNCATE '.$this->getPrefix().$sTable.';';
         return $sSql;
     }
-        
+
     /**
     * Generate SQL for add field
     */
@@ -370,7 +399,7 @@ class Migrations{
         $sSql = trim( $sSql, ", \n\t" ).';';
         return $sSql;
     }
-        
+
     /**
     * Generate SQL for drop field
     */
@@ -378,18 +407,18 @@ class Migrations{
         $sSql = 'ALTER TABLE '.$this->getPrefix().$sTable.' DROP '.$column.';';
         return $sSql;
     }
-        
+
     /**
     * Generate SQL for alter field
     */
     function alter_field( $sTable, $aField ){
-        $sSql = 'ALTER TABLE '.$this->getPrefix().$sTable.' CHANGE '.key( $aField ).' '.$this->_buildColumn( 
+        $sSql = 'ALTER TABLE '.$this->getPrefix().$sTable.' CHANGE '.key( $aField ).' '.$this->_buildColumn(
                 ( !empty( $aField['name'] ) ? $aField['name'] : key( $aField ) ),
                   $aField[key($aField)] );
         $sSql = trim( $sSql, ", \n\t" );
         return $sSql;
     }
-    
+
     /**
     * Generate SQL for keys ( index and unique )
     */
@@ -399,17 +428,17 @@ class Migrations{
         $sSql = 'ALTER TABLE '.$this->getPrefix().$sTable.' ADD '.$this->oDb->buildIndex( array( $sColumn => array( $sType => true, 'column' => $sColumn ) ) );
         return $sSql;
     }
-        
+
     /**
     * If there is a query - just return it
     */
     function query( $query ){
         return $query;
     }
-    
+
     /**
     * Internal wrapper for DBoSource::buildColumn()
-    * 
+    *
     * @access protected
     * @param string $sName Field name
     * @param string $aValue Values - can contain 'type', 'length', 'default', 'null', 'auto_increment'
@@ -423,14 +452,14 @@ class Migrations{
         };
         return $sSql;
     }
-    
+
     /**
     * Format field properties
     */
     function _formatProperties( $aProps ){
         if( !is_array( $aProps ) )
             return;
-        
+
         //turn array to hash
         if( isset( $aProps[0] ) && !isset( $aProps['type'] ) ){
             $aProps['type'] = $aProps[0];
@@ -438,41 +467,41 @@ class Migrations{
             $aProps['null'] = $aProps[2];
             unset( $aProps[0], $aProps[1], $aProps[2] );
         }
-        
+
         if( empty( $aProps['type'] ) ){
             $aProps['type'] = 'string';
             $aProps['length'] = '255';
         }
-        
+
         if ($aProps['type'] == 'int'){
             $aProps['type'] = 'integer';
         }
-        
+
         if ($aProps['type'] == 'bool'){
             $aProps['type'] = 'boolean';
             $aProps['length'] = 1;
         }
 
         $aResult = array( 'type' => $aProps['type'] );
-        
-        if( !empty( $aProps['length'] ) ) 
+
+        if( !empty( $aProps['length'] ) )
             $aResult['length'] = $aProps['length'];
 
         if( in_array( 'not_null', $aProps ) )
             $aResult['null'] = false;
-        
+
         if( in_array( 'is_null', $aProps ) )
             $aResult['null'] = true;
 
-        if( !empty( $aProps['default'] ) ) 
+        if( !empty( $aProps['default'] ) )
             $aResult['default'] = $aProps['default'];
 
-        if( !empty( $aProps['primary'] ) ) 
+        if( !empty( $aProps['primary'] ) )
             $aResult['key'] = 'primary';
 
         return $aResult;
     }
-    
+
     /**
     * Executes tasks in the specified section ( UP or DOWN )
     *
@@ -495,7 +524,7 @@ class Migrations{
 
         return true;
     }
-    
+
     /**
     * Build an array holding a db schema for a table
     *
@@ -526,7 +555,7 @@ class Migrations{
         if(!array_key_exists('created', $aModelFields)){
             $aTableSchema[] = 'no_dates';
         }
-        
+
         return $aTableSchema;
     }
 }
